@@ -374,7 +374,7 @@ def analyze_table_structure(target_url=None, check_interval=15):
     
     # 使用提供的URL或默认值
     if not target_url:
-        target_url = "https://oc.sjtu.edu.cn/courses/82026/external_tools/6650"
+        target_url = "https://oc.sjtu.edu.cn/courses/..."
     
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=chrome_options)
@@ -448,11 +448,11 @@ def print_usage():
     print("\n使用方法:")
     print("1. 正常监控模式:")
     print("   python signin_monitor_v3_1.py [目标URL] [检查间隔]")
-    print("   示例: python signin_monitor_v3_1.py https://oc.sjtu.edu.cn/courses/82026/external_tools/6650 15")
+    print("   示例: python signin_monitor_v3_1.py https://oc.sjtu.edu.cn/courses/...")
     print()
     print("2. 调试分析模式:")
     print("   python signin_monitor_v3_1.py --analyze [目标URL]")
-    print("   示例: python signin_monitor_v3_1.py --analyze https://oc.sjtu.edu.cn/courses/82026/external_tools/6650")
+    print("   示例: python signin_monitor_v3_1.py --analyze https://oc.sjtu.edu.cn/courses/...")
     print()
     print("3. 默认模式（使用默认URL和15秒间隔）:")
     print("   python signin_monitor_v3_1.py")
