@@ -18,7 +18,7 @@ except ImportError:
     FEISHU_AVAILABLE = False
 
 class SigninMonitorV3:
-    def __init__(self, target_url=None, check_interval=15, feishu_notify=True):
+    def __init__(self, target_url=None, check_interval=15, feishu_notify=True, course_name="未知课程"):
         """
         初始化监控器
 
@@ -26,12 +26,14 @@ class SigninMonitorV3:
         - target_url: 目标签到页面URL，默认为None（需要手动指定）
         - check_interval: 检查频率（秒），默认15秒
         - feishu_notify: 是否启用飞书群消息通知，默认True
+        - course_name: 课程名称，用于通知消息
         """
         self.driver = None
         self.previous_signin_num = None
         self.check_interval = check_interval
         self.attempt_count = 0
         self.feishu_notify = feishu_notify and FEISHU_AVAILABLE
+        self.course_name = course_name
 
         # 设置目标URL，如果未提供则使用默认值
         if target_url:
@@ -48,47 +50,59 @@ class SigninMonitorV3:
             print(f"⚠️  飞书通知: feishu_notify.py 未找到，已禁用")
         
     def setup_driver(self):
-        """设置Chrome驱动"""
+        """设置Chrome驱动，使用 user-data-dir 持久化登录状态"""
+        import os
         chrome_options = Options()
-        
+
+        # 持久化 profile 目录（复用登录 cookie，第二次启动无需再登录）
+        profile_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chrome_profile")
+        chrome_options.add_argument(f"--user-data-dir={profile_dir}")
+
         # 禁用自动化特征检测
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
-        
+
         # 添加常用参数
         chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        
+
         try:
             service = Service(ChromeDriverManager().install())
             self.driver = webdriver.Chrome(service=service, options=chrome_options)
             print("✅ 浏览器驱动初始化成功")
+            print(f"📂 登录数据目录: {profile_dir}")
             return True
         except Exception as e:
             print(f"❌ 驱动初始化失败: {e}")
             return False
     
     def wait_for_manual_login(self):
-        """等待用户手动登录"""
-        print("\n" + "="*60)
-        print("手动登录指引")
-        print("="*60)
-        print("1. 浏览器将打开上海交通大学Canvas页面")
-        print("2. 请完成JAccount登录（用户名、密码、验证码）")
-        print("3. 等待页面完全加载，直到看到签到界面")
-        print("4. 最后，回到此命令行窗口按回车键继续")
-        print("="*60 + "\n")
-        
-        # 使用配置的目标URL
-        print(f"🌐 正在访问: {self.target_url}")
+        """等待用户登录。使用持久化 profile 后，通常自动跳过登录。"""
+        print(f"\n🌐 正在访问: {self.target_url}")
         self.driver.get(self.target_url)
-        
-        # 等待页面初始加载
-        time.sleep(5)
-        print("⏳ 页面已加载，请开始登录...")
-        
-        # 等待用户登录完成
-        input("\n✅ 登录完成后，请按回车键继续程序...")
+
+        # 等待页面加载
+        time.sleep(8)
+
+        # 检测是否需要登录（URL 包含 login 或页面标题是"未授权"）
+        current_url = self.driver.current_url
+        title = self.driver.title
+
+        if "login" in current_url or "未授权" in title:
+            print("\n" + "="*60)
+            print("需要登录 jAccount")
+            print("="*60)
+            print("1. 在浏览器中完成 jAccount 登录")
+            print("2. 等待页面加载到签到界面")
+            print("3. 回到此窗口按回车键继续")
+            print("="*60)
+            input("\n✅ 登录完成后，请按回车键继续...")
+            # 登录后重新访问目标页面
+            self.driver.get(self.target_url)
+            time.sleep(8)
+        else:
+            print("✅ 已自动登录（复用上次会话）")
+
         return True
     
     def find_and_switch_to_signin_iframe(self):
@@ -291,8 +305,18 @@ class SigninMonitorV3:
             except:
                 pass
     
+    def _notify_feishu(self, msg):
+        """发送飞书通知（群聊+私聊）"""
+        if not self.feishu_notify:
+            return
+        try:
+            send_feishu_message(msg)
+            print(f"📨 飞书通知已发送: {msg}")
+        except Exception as e:
+            print(f"⚠️  飞书通知失败: {e}")
+
     def alert_sound(self, old_num=None, new_num=None):
-        """发出警报声音 + 飞书群消息通知"""
+        """发出警报声音 + 飞书通知（新签到开始）"""
         # 声音警报
         system = platform.system()
         try:
@@ -318,14 +342,9 @@ class SigninMonitorV3:
             print("!!! 签到号已变化 !!!")
             print("!" * 50)
 
-        # 飞书群消息通知
-        if self.feishu_notify:
-            try:
-                msg = f"[Canvas签到] 签到号变化: {old_num} -> {new_num}"
-                send_feishu_message(msg)
-                print("📨 飞书通知已发送")
-            except Exception as e:
-                print(f"⚠️  飞书通知失败: {e}")
+        # 飞书通知
+        now = time.strftime("%H:%M")
+        self._notify_feishu(f"[{now}] {self.course_name} 开始签到! 签到号: {new_num} (上次: {old_num})")
     
     def run_monitoring(self):
         """运行监控循环"""
