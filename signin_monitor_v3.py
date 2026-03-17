@@ -10,29 +10,42 @@ from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.options import Options
 
+# 飞书通知（可选）
+try:
+    from feishu_notify import send_feishu_message
+    FEISHU_AVAILABLE = True
+except ImportError:
+    FEISHU_AVAILABLE = False
+
 class SigninMonitorV3:
-    def __init__(self, target_url=None, check_interval=15):
+    def __init__(self, target_url=None, check_interval=15, feishu_notify=True):
         """
         初始化监控器
-        
+
         参数:
         - target_url: 目标签到页面URL，默认为None（需要手动指定）
         - check_interval: 检查频率（秒），默认15秒
+        - feishu_notify: 是否启用飞书群消息通知，默认True
         """
         self.driver = None
         self.previous_signin_num = None
         self.check_interval = check_interval
         self.attempt_count = 0
-        
+        self.feishu_notify = feishu_notify and FEISHU_AVAILABLE
+
         # 设置目标URL，如果未提供则使用默认值
         if target_url:
             self.target_url = target_url
         else:
             # 默认URL，保持向后兼容
             self.target_url = "https://oc.sjtu.edu.cn/courses/..."
-        
+
         print(f"🎯 目标URL: {self.target_url}")
         print(f"⏰ 检查频率: {self.check_interval}秒")
+        if self.feishu_notify:
+            print(f"📨 飞书通知: 已启用")
+        elif feishu_notify and not FEISHU_AVAILABLE:
+            print(f"⚠️  飞书通知: feishu_notify.py 未找到，已禁用")
         
     def setup_driver(self):
         """设置Chrome驱动"""
@@ -127,65 +140,64 @@ class SigninMonitorV3:
         return False
     
     def get_signin_number_from_first_rows(self):
-        """检查所有表格的第一行，若为文字则跳过"""
-        print("\n📊 检查所有表格的第一行...")
-        
+        """从表格中提取签到号。
+
+        Canvas 签到表格结构: 表头行 [签到号, 状态, 创建时间]，
+        数据行的第一个 cell 就是签到号（纯数字）。
+        改进: 按 cell 精确定位，避免整行正则把日期数字误判为签到号。
+        """
+        print("\n📊 检查表格中的签到号...")
+
         try:
-            # 查找所有表格
             tables = self.driver.find_elements(By.TAG_NAME, "table")
             print(f"找到 {len(tables)} 个表格")
-            
+
             if not tables:
                 print("⚠️  未找到任何表格，尝试其他查找方式...")
                 return self.fallback_find_signin_number()
-            
-            # 遍历所有表格，检查第一行
+
             for table_idx, table in enumerate(tables):
-                print(f"\n检查表格 {table_idx+1}:")
-                
-                # 获取表格的所有行
                 rows = table.find_elements(By.TAG_NAME, "tr")
-                print(f"  此表格有 {len(rows)} 行")
-                
-                if len(rows) == 0:
-                    print("  表格为空，跳过")
+                print(f"\n检查表格 {table_idx+1}: {len(rows)} 行")
+
+                if len(rows) < 2:
+                    # 至少需要表头+1行数据
                     continue
-                
-                # 检查第一行
-                first_row = rows[0]
-                first_row_text = first_row.text.strip()
-                print(f"  第一行文本: '{first_row_text}'")
-                
-                # 判断第一行是否为文字（不含数字或纯数字的情况）
+
+                # 跳过表头（第0行），从第1行（最新数据）开始
+                data_row = rows[1] if len(rows) > 1 else rows[0]
+                cells = data_row.find_elements(By.TAG_NAME, "td")
+
+                if not cells:
+                    # 有些表格用 div.cell 做单元格（Element UI）
+                    cells = data_row.find_elements(By.CSS_SELECTOR, ".cell")
+
+                if cells:
+                    first_cell_text = cells[0].text.strip()
+                    print(f"  第一个 cell 文本: '{first_cell_text}'")
+
+                    if first_cell_text.isdigit():
+                        print(f"  ✅ 签到号: {first_cell_text}")
+                        return first_cell_text
+
+                # 如果按 cell 没找到，回退到整行判断
+                first_row_text = data_row.text.strip()
                 if not first_row_text:
-                    print("  第一行为空，跳过此表格")
                     continue
-                
-                # 检查是否包含数字
-                numbers_in_first_row = re.findall(r'\d+', first_row_text)
-                
-                if numbers_in_first_row:
-                    # 第一行包含数字，可能是签到号
-                    print(f"  ✅ 第一行包含数字: {numbers_in_first_row}")
-                    
-                    # 判断是否为纯数字（可能是签到号）
-                    if first_row_text.isdigit():
-                        print(f"  🎯 第一行为纯数字，可能是签到号: {first_row_text}")
-                        return first_row_text
-                    else:
-                        # 第一行包含数字但不是纯数字，可能是"签到号: 7"这样的格式
-                        print(f"  🔍 第一行包含数字但不是纯数字")
-                        # 尝试提取第一个数字
-                        return numbers_in_first_row[0]
-                else:
-                    # 第一行是纯文字，跳过此表格
-                    print(f"  ⏭️  第一行为纯文字，跳过此表格")
-                    continue
-            
-            # 如果所有表格的第一行都是文字，尝试查找其他元素
-            print("\n⚠️  所有表格的第一行都是文字，尝试其他查找方式...")
+
+                # 只匹配行首独立数字（排除日期中的数字）
+                match = re.match(r'^(\d{1,5})\b', first_row_text)
+                if match:
+                    num = match.group(1)
+                    print(f"  ✅ 行首匹配签到号: {num}")
+                    return num
+
+                # 整行纯文字，跳过此表格
+                print(f"  ⏭️  未找到签到号，跳过此表格")
+
+            print("\n⚠️  所有表格均未找到签到号，尝试备用方式...")
             return self.fallback_find_signin_number()
-            
+
         except Exception as e:
             print(f"❌ 检查表格时出错: {e}")
             return self.fallback_find_signin_number()
@@ -260,7 +272,7 @@ class SigninMonitorV3:
                     elif current_num != self.previous_signin_num:
                         print(f"🚨 签到号已变化!")
                         print(f"   从 {self.previous_signin_num} 变为 {current_num}")
-                        self.alert_sound()
+                        self.alert_sound(old_num=self.previous_signin_num, new_num=current_num)
                         self.previous_signin_num = current_num
                     else:
                         print(f"📊 签到号未变: {current_num}")
@@ -279,10 +291,10 @@ class SigninMonitorV3:
             except:
                 pass
     
-    def alert_sound(self):
-        """发出警报声音"""
+    def alert_sound(self, old_num=None, new_num=None):
+        """发出警报声音 + 飞书群消息通知"""
+        # 声音警报
         system = platform.system()
-        
         try:
             if system == "Windows":
                 import winsound
@@ -298,16 +310,22 @@ class SigninMonitorV3:
                     os.system('echo -e "\a"')
                     time.sleep(0.2)
             else:
-                print("\a\a\a")  # 通用响铃字符
-                
+                print("\a\a\a")
             print("🔔 签到号变化警报已触发！")
-            
         except Exception as e:
             print(f"⚠️  声音警报失败: {e}")
-            # 视觉警报
             print("!" * 50)
             print("!!! 签到号已变化 !!!")
             print("!" * 50)
+
+        # 飞书群消息通知
+        if self.feishu_notify:
+            try:
+                msg = f"[Canvas签到] 签到号变化: {old_num} -> {new_num}"
+                send_feishu_message(msg)
+                print("📨 飞书通知已发送")
+            except Exception as e:
+                print(f"⚠️  飞书通知失败: {e}")
     
     def run_monitoring(self):
         """运行监控循环"""
@@ -463,33 +481,40 @@ if __name__ == "__main__":
     target_url = None
     check_interval = 15
     run_mode = "monitor"  # 默认监控模式
-    
-    # 处理命令行参数
-    if len(sys.argv) > 1:
-        if sys.argv[1] == "--analyze":
+    feishu_enabled = True
+
+    args = sys.argv[1:]
+
+    if "--no-feishu" in args:
+        feishu_enabled = False
+        args.remove("--no-feishu")
+
+    if args:
+        if args[0] == "--analyze":
             run_mode = "analyze"
-            if len(sys.argv) > 2:
-                target_url = sys.argv[2]
-        elif sys.argv[1] == "--help" or sys.argv[1] == "-h":
+            if len(args) > 1:
+                target_url = args[1]
+        elif args[0] in ("--help", "-h"):
             print_usage()
             sys.exit(0)
         else:
-            # 第一个参数是URL
-            target_url = sys.argv[1]
-            if len(sys.argv) > 2:
+            target_url = args[0]
+            if len(args) > 1:
                 try:
-                    check_interval = int(sys.argv[2])
+                    check_interval = int(args[1])
                 except ValueError:
                     print(f"⚠️  检查间隔参数无效，使用默认值 {check_interval} 秒")
-    
+
     if run_mode == "analyze":
-        # 调试分析模式
         analyze_table_structure(target_url, check_interval)
     else:
-        # 正常监控模式
         if target_url:
             print(f"📋 使用自定义URL: {target_url}")
             print(f"⏰ 检查间隔: {check_interval}秒")
-        
-        monitor = SigninMonitorV3(target_url=target_url, check_interval=check_interval)
+
+        monitor = SigninMonitorV3(
+            target_url=target_url,
+            check_interval=check_interval,
+            feishu_notify=feishu_enabled,
+        )
         monitor.run()
