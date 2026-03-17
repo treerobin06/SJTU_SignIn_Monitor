@@ -18,7 +18,8 @@ except ImportError:
     FEISHU_AVAILABLE = False
 
 class SigninMonitorV3:
-    def __init__(self, target_url=None, check_interval=15, feishu_notify=True, course_name="未知课程"):
+    def __init__(self, target_url=None, check_interval=15, feishu_notify=True,
+                 course_name="未知课程", redirect_url=None):
         """
         初始化监控器
 
@@ -27,6 +28,7 @@ class SigninMonitorV3:
         - check_interval: 检查频率（秒），默认15秒
         - feishu_notify: 是否启用飞书群消息通知，默认True
         - course_name: 课程名称，用于通知消息
+        - redirect_url: 检测到签到后自动跳转的 URL
         """
         self.driver = None
         self.previous_signin_num = None
@@ -34,6 +36,7 @@ class SigninMonitorV3:
         self.attempt_count = 0
         self.feishu_notify = feishu_notify and FEISHU_AVAILABLE
         self.course_name = course_name
+        self.redirect_url = redirect_url
 
         # 设置目标URL，如果未提供则使用默认值
         if target_url:
@@ -288,6 +291,12 @@ class SigninMonitorV3:
                         print(f"   从 {self.previous_signin_num} 变为 {current_num}")
                         self.alert_sound(old_num=self.previous_signin_num, new_num=current_num)
                         self.previous_signin_num = current_num
+                        # 自动跳转到指定页面
+                        if self.redirect_url:
+                            self.driver.switch_to.default_content()
+                            print(f"🔗 自动跳转: {self.redirect_url}")
+                            self.driver.execute_script(f"window.open('{self.redirect_url}', '_blank');")
+                            print("✅ 已在新标签页打开")
                     else:
                         print(f"📊 签到号未变: {current_num}")
                 else:

@@ -25,12 +25,18 @@ if script_dir not in sys.path:
 from signin_monitor_v3 import SigninMonitorV3
 
 # ── 课程配置 ──────────────────────────────────────────
-# 星期 → (课程名, Canvas 签到页 URL)
+# 星期 → (课程名, 签到监控 URL, 签到后跳转 URL)
 # 星期编号: 0=周一, 1=周二, ..., 6=周日
 COURSE_SCHEDULE = {
-    0: ("中国马克思主义与当代", "https://oc.sjtu.edu.cn/courses/90285/external_tools/6650"),
-    1: ("机器学习理论", "https://oc.sjtu.edu.cn/courses/91265/external_tools/6650"),
-    3: ("强化学习", "https://oc.sjtu.edu.cn/courses/91266/external_tools/6650"),
+    0: ("中国马克思主义与当代",
+        "https://oc.sjtu.edu.cn/courses/90285/external_tools/6650",
+        "https://oc.sjtu.edu.cn/courses/90285/external_tools/9487"),
+    1: ("机器学习理论",
+        "https://oc.sjtu.edu.cn/courses/91265/external_tools/6650",
+        "https://oc.sjtu.edu.cn/courses/91265/external_tools/9487"),
+    3: ("强化学习",
+        "https://oc.sjtu.edu.cn/courses/91266/external_tools/6650",
+        "https://oc.sjtu.edu.cn/courses/91266/external_tools/9487"),
 }
 
 # 检查间隔（秒）
@@ -67,10 +73,11 @@ def main():
         print(f"今天是星期{day_names[weekday]}，没有需要签到的课程。")
         sys.exit(0)
 
-    course_name, target_url = COURSE_SCHEDULE[weekday]
+    course_name, target_url, redirect_url = COURSE_SCHEDULE[weekday]
     print(f"\n{'='*60}")
     print(f"  今日课程: {course_name}")
     print(f"  签到页面: {target_url}")
+    print(f"  签到后跳转: {redirect_url}")
     print(f"  检查间隔: {CHECK_INTERVAL}秒")
     print(f"{'='*60}\n")
 
@@ -79,6 +86,7 @@ def main():
         check_interval=CHECK_INTERVAL,
         feishu_notify=True,
         course_name=course_name,
+        redirect_url=redirect_url,
     )
     monitor.run()
 
