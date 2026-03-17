@@ -438,7 +438,8 @@ def analyze_table_structure(target_url=None, check_interval=15):
                         if row_text.isdigit():
                             print(f"      ✅ 纯数字行!")
                         elif re.search(r'\d', row_text):
-                            print(f"      🔢 包含数字: {re.findall(r'\d+', row_text)}")
+                            nums = re.findall(r'\d+', row_text)
+                            print(f"      🔢 包含数字: {nums}")
                         else:
                             print(f"      📝 纯文字行")
                         
