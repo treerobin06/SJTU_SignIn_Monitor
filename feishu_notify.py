@@ -23,6 +23,8 @@ APP_ID = "cli_a924694223f89bc3"
 APP_SECRET = "GbJPpAlYYWVUbpFIK2gzgcXZiJrRA8mr"
 # 默认群聊 ID（"feishu" 群）
 DEFAULT_CHAT_ID = "oc_afe51acea89065e9fe3431208b214433"
+# 私聊 open_id（姜博文）
+DEFAULT_OPEN_ID = "ou_8c0782470768072112d19fbaf799ec34"
 
 BASE_URL = "https://open.feishu.cn/open-apis"
 CTX = ssl.create_default_context()
@@ -49,27 +51,13 @@ def _get_token():
     return resp["tenant_access_token"]
 
 
-def send_feishu_message(text, chat_id=None):
-    """
-    发送文本消息到飞书群聊。
-
-    参数:
-      text: 消息文本
-      chat_id: 群聊 ID，默认使用 "feishu" 群
-
-    返回:
-      dict: 飞书 API 响应（包含 message_id 等）
-
-    异常:
-      Exception: API 调用失败时抛出
-    """
-    chat_id = chat_id or DEFAULT_CHAT_ID
-    token = _get_token()
+def _send(receive_id, receive_id_type, text, token):
+    """底层发送，返回 data dict。"""
     resp = _request(
-        f"{BASE_URL}/im/v1/messages?receive_id_type=chat_id",
+        f"{BASE_URL}/im/v1/messages?receive_id_type={receive_id_type}",
         method="POST",
         data={
-            "receive_id": chat_id,
+            "receive_id": receive_id,
             "msg_type": "text",
             "content": json.dumps({"text": text}, ensure_ascii=False),
         },
@@ -78,6 +66,43 @@ def send_feishu_message(text, chat_id=None):
     if resp.get("code") != 0:
         raise Exception(f"飞书发送失败: {resp.get('msg')} (code={resp.get('code')})")
     return resp.get("data", {})
+
+
+def send_feishu_message(text, chat_id=None, open_id=None):
+    """
+    同时发送文本消息到飞书群聊 + 私聊。
+
+    参数:
+      text: 消息文本
+      chat_id: 群聊 ID，默认 "feishu" 群。传 False 跳过群聊
+      open_id: 私聊 open_id，默认姜博文。传 False 跳过私聊
+
+    返回:
+      dict: {"group": ..., "private": ...} 各自的 API 响应
+    """
+    if chat_id is None:
+        chat_id = DEFAULT_CHAT_ID
+    if open_id is None:
+        open_id = DEFAULT_OPEN_ID
+
+    token = _get_token()
+    results = {}
+
+    # 群聊
+    if chat_id:
+        try:
+            results["group"] = _send(chat_id, "chat_id", text, token)
+        except Exception as e:
+            results["group_error"] = str(e)
+
+    # 私聊
+    if open_id:
+        try:
+            results["private"] = _send(open_id, "open_id", text, token)
+        except Exception as e:
+            results["private_error"] = str(e)
+
+    return results
 
 
 if __name__ == "__main__":
